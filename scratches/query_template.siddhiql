@@ -19,7 +19,7 @@ insert into statStreamSec;
 --NO usage of statStreamSec stream yet. As such, NO persisting of this stream yet.
 
 --per minute stats
-from rawStream#window.externalTimeBatch($timestampAttr, 60 sec, 0)
+from statStreamSec#window.externalTimeBatch($timestampAttr, 60 sec, 0)
 select $timestampAttr, time:extract($timestampAttr, 'year') as year, time:extract($timestampAttr, 'month') as month, time:extract($timestampAttr, 'day') as day, time:extract($timestampAttr, 'hour') as hour, time:extract($timestampAttr, 'minute') as minute, avg(_avg) as _avg, sum(_count) as _count, sum(_sum) as _sum
 insert into statStreamMin;
 --EXPORT statStreamMin
