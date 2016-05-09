@@ -1,0 +1,107 @@
+<%
+(function () {
+    var TYPE = "type";
+    var CONTENT_TYPE_JSON = "application/json";
+    var AUTHORIZATION_HEADER = "Authorization";
+    var USER_TOKEN = "user";
+    var USERNAME = "username";
+    var HTTP_USER_NOT_AUTHENTICATED = 403;
+    var HTTP_INTERNAL_ERROR = 500;
+    var log = new Log();
+    var carbon = require('carbon');
+    var configs = require('../configs/designer.json');
+    var utils = require('../modules/utils.js');
+    var esbanalyticsUtils = require('esbanalytics-utils.jag');
+    var JSUtils = Packages.org.wso2.carbon.analytics.jsservice.Utils;
+    var AnalyticsCachedJSServiceConnector = Packages.org.wso2.carbon.analytics.jsservice.AnalyticsCachedJSServiceConnector;
+    var AnalyticsCache = Packages.org.wso2.carbon.analytics.jsservice.AnalyticsCachedJSServiceConnector.AnalyticsCache;
+    var cacheTimeoutSeconds = 5;
+    var loggedInUser = null;
+    var timeRangeUtil = Packages.org.wso2.carbon.analytics.esb.util.TimeRangeUtils;
+    var timeRange = Packages.org.wso2.carbon.analytics.esb.bean.TimeRange;
+
+    if (configs.cacheTimeoutSeconds) {
+        cacheTimeoutSeconds = parseInt(configs.cacheTimeoutSeconds);
+    }
+    var cacheSizeBytes = 1024 * 1024 * 1024; // 1GB
+    if (configs.cacheSizeBytes) {
+        cacheSizeBytes = parseInt(configs.cacheSizeBytes);
+    }
+
+    response.contentType = CONTENT_TYPE_JSON;
+
+    var authParam = request.getHeader(AUTHORIZATION_HEADER);
+    if (authParam != null) {
+        credentials = JSUtils.authenticate(authParam);
+        loggedInUser = credentials[0];
+    } else {
+        var token = session.get(USER_TOKEN);
+        if (token != null) {
+            loggedInUser = token[USERNAME];
+        } else {
+            log.error("user is not authenticated!");
+            response.status = HTTP_USER_NOT_AUTHENTICATED;
+            print('{ "status": "Failed", "message": "User is not authenticated." }');
+            return;
+        }
+    }
+
+    var cache = application.get("AnalyticsWebServiceCache");
+    if (cache == null) {
+        cache = new AnalyticsCache(cacheTimeoutSeconds, cacheSizeBytes);
+        application.put("AnalyticsWebServiceCache", cache);
+    }
+
+    var connector = new AnalyticsCachedJSServiceConnector(cache);
+
+    var content = request.getContent();
+    if (content != '' && content != null) {
+        if (log.isDebugEnabled()) {
+            log.debug("value of content: " + stringify(contentAsString));
+        }
+    }
+    if (connector != null && loggedInUser != null) {
+        var result = null;
+        var query = null;
+        var resp = null;
+        var timeFrom = request.getParameter("timeFrom");
+        var timeTo = request.getParameter("timeTo");
+        var tableName = request.getParameter("tableName");
+        var metric = request.getParameter("metric");
+        result = [];
+        var timeUnit = timeRangeUtil.getSuitableTimeRangeUnit(timeFrom, timeTo);
+        var tableName = "temp-stat-per-" + timeUnit;
+//        var tableName = "temp-stat-per-day";
+        query = stringify({
+                          query: "timestamp : [" + timeFrom + " TO " + timeTo + "]",
+                          "start": 0,
+                          "count": 200
+                      });
+        resp = connector.search(loggedInUser, tableName, query);
+        var dataPoints = JSON.parse(resp.getMessage());
+
+        for (var i = 0; i < dataPoints.length; i++) {
+            var obj = dataPoints[i];
+            var resultObj = {"timestamp": obj.values.timestamp};
+            resultObj[metric] = obj.values.avg_temp;
+
+            if (obj != null) {
+            result.push(resultObj);
+            }
+        }
+        if (result != null) {
+            if (log.isDebugEnabled()) {
+                log.debug("value of result: " + result);
+            }
+            var finalResult = {
+                status: "success",
+                message: result
+            }
+            print(finalResult);
+        }
+    } else {
+        print('{ "status": "Failed", "statusCode": "500", "message": "AnalyticsCachedWebServiceConnector is unavailable" }');
+    }
+
+}());
+%>
