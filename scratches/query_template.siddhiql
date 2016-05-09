@@ -1,0 +1,35 @@
+/* Enter a unique ExecutionPlan */
+@Plan:name('AnalyticsExecutionPlanUsing$streamName:$streamVersion')
+
+/* Enter a unique description for ExecutionPlan */
+@Plan:description('ExecutionPlan for analysing $streamName:$streamVersion stream')
+
+/* define streams/tables and write queries here ... */
+
+@Import('$streamName:$streamVersion')
+define stream rawStream ($timestampAttr long, $valueAttr double);
+
+@Export('$streamName-stat-per-minute:$streamVersion')
+define stream statStreamMin ($timestampAttr long, year int, month int, day int, hour int, minute int, _avg double, _count long, _sum double);
+
+--per second stats
+from rawStream#window.externalTimeBatch($timestampAttr, 1 sec, 0)
+select $timestampAttr, avg($valueAttr) as _avg, count($valueAttr) as _count, sum($valueAttr) as _sum
+insert into statStreamSec;
+--NO usage of statStreamSec stream yet. As such, NO persisting of this stream yet.
+
+--per minute stats
+from rawStream#window.externalTimeBatch($timestampAttr, 60 sec, 0)
+select $timestampAttr, time:extract($timestampAttr, 'year') as year, time:extract($timestampAttr, 'month') as month, time:extract($timestampAttr, 'day') as day, time:extract($timestampAttr, 'hour') as hour, time:extract($timestampAttr, 'minute') as minute, avg(_avg) as _avg, sum(_count) as _count, sum(_sum) as _sum
+insert into statStreamMin;
+--EXPORT statStreamMin
+
+
+---Variables:
+-------------
+--StreamName
+--StreamVersion
+--StreamNameVersionSeparator
+
+--timestampAttr
+--valueAttr

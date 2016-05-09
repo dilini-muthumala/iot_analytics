@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ~ Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<templateDomain name="CustomDashboardAnalytics">
+    <description>Real-time and batch query templates for creating custom analytic dashboards</description>
+    <templates>
+
+
+        <template name="AddGadget">
+            <description>Configure a gadget to display stats, given a stream of your choice</description>
+            <executionType>iot</executionType>
+
+            <executionPlans>
+                <executionPlan>
+                    <![CDATA[
+
+                    ]]>
+                </executionPlan>
+            </executionPlans>
+
+            <script>
+                <![CDATA[
+                  create temporary table accessTokenRefreshTime using CarbonAnalytics options (tableName "ACCESSTOKENREFRESHTIMEDIFFERENCETABLE", schema "userId STRING, clientId STRING, scopes STRING, timeDifference LONG, timestamp LONG");
+
+create temporary table accessTokenRefreshAvrgTime using CarbonAnalytics options (tableName "AccessTokenRefreshSummaryTable", schema "userId STRING -i, clientId STRING -i, scopes STRING -i, minTimeDifference DOUBLE -i, maxTimeDifference DOUBLE -i", primaryKeys "userId, clientId, scopes");
+
+INSERT INTO TABLE accessTokenRefreshAvrgTime
+      SELECT temp.userId, temp.clientId, temp.scopes, getpercentileValue(AVG(timeDifference), SQRT(AVG(timeDifference*timeDifference) - AVG(timeDifference)*AVG(timeDifference)), $lowerPercentile) as minTimeDifference, getpercentileValue(AVG(timeDifference), SQRT(AVG(timeDifference*timeDifference) - AVG(timeDifference)*AVG(timeDifference)), $upperPercentile) as maxTimeDifference
+      FROM
+         (SELECT userId, clientId,scopes, timeDifference
+          FROM accessTokenRefreshTime
+            WHERE timestamp >= offsetInDays(-7)) temp
+      GROUP BY userId, clientId, scopes;
+
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="lowerPercentile" type="double">
+                    <displayName>Lower percentile</displayName>
+                    <description>Lower percentile to calculate minimum time difference</description>
+                    <defaultValue>0.10</defaultValue>
+                </parameter>
+
+
+                <parameter name="upperPercentile" type="double">
+                    <displayName>Upper percentile</displayName>
+                    <description>Upper percentile to calculate maximum time difference</description>
+                    <defaultValue>0.95</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+
+
+
+        <template name="AbnormalTierUsageAlert">
+            <description>This is the CEP stream for Abnormal Tier Usage</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_ABNORMAL_REQUESTS
+                USING CarbonAnalytics
+                OPTIONS(tableName "ORG_WSO2_APIMGT_STATISTICS_REQUEST");
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_AVG_REQ_FOR_X_DAYS
+                USING CarbonAnalytics
+                OPTIONS (tableName "ORG_WSO2_API_AVG_REQ_FOR_X_DAYS_TBL",
+                   schema "applicationId STRING, api_version STRING, request_count INT"
+                );
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_ABNORMAL_ADITIONAL_DATA
+                USING CarbonAnalytics
+                OPTIONS (tableName "ORG_WSO2_API_ABNORMAL_ADITIONAL_DATA_TBL",
+                   schema "applicationId STRING, api_version STRING, applicationName STRING, applicationOwner STRING, api STRING, tier STRING"
+                );
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_PERCENTILE
+                USING CarbonAnalytics
+                OPTIONS (tableName "ORG_WSO2_API_PERCENTILE_TBL",
+                   schema "applicationId STRING, api_version STRING, requestsPerDayPercentile FLOAT"
+                );
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_ABNORMAL_USAGE_ALERT
+                USING CarbonAnalytics
+                OPTIONS (tableName "ORG_WSO2_API_ABNORMAL_USAGE_ALERT_TBL",
+                   schema "applicationId STRING, api_version STRING"
+                );
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_ABNORMAL_STREAM_TABLE
+                USING org.wso2.carbon.analytics.spark.event.EventStreamProvider
+                OPTIONS (receiverURL "tcp://127.0.0.1:$receiverURLPort",
+                         authURL "ssl://127.0.0.1:$authURLPort",
+                         username "admin",
+                         password "admin",
+                         streamName "org.wso2.analytics.apim.alert.abnormalTierUsageAlert",
+                         version "1.0.0",
+                         description "This is the CEP stream for Abnormal Tier Usage",
+                         nickName "abnormalTierUsageAlert",
+                         payload "applicationId STRING, api_version STRING, msg STRING, alertTimestamp LONG"
+                );
+
+                CREATE TEMPORARY TABLE ORG_WSO2_API_ALL_ALERT_STREAM_TABLE
+                USING org.wso2.carbon.analytics.spark.event.EventStreamProvider
+                OPTIONS (receiverURL "tcp://127.0.0.1:$receiverURLPort",
+                         authURL "ssl://127.0.0.1:$authURLPort",
+                         username "admin",
+                         password "admin",
+                         streamName "org.wso2.analytics.apim.allApimAlertsStream",
+                         version "1.0.0",
+                         description "This is the table represents all alert stream",
+                         nickName "allApimAlertsStream",
+                         payload "type STRING, msg STRING, alertTimestamp LONG"
+                );
+
+                INSERT OVERWRITE TABLE ORG_WSO2_API_PERCENTILE
+                SELECT applicationId, api_version, getpercentileValue(AVG(request_count), SQRT(AVG(request_count*request_count) - AVG(request_count)*AVG(request_count)), $percentile) as percentile
+                FROM
+                   (SELECT applicationId, api_version, COUNT(api_version) as request_count
+                    FROM ORG_WSO2_API_ABNORMAL_REQUESTS
+                    WHERE context is not NULL  AND now('') > convertToTimestamp('$alertStartDate') AND requestTime >= offsetInDays(-$daysConsiderForPercentilesCalculation)
+                    GROUP BY convertToDate(requestTime), applicationId, api_version) ORG_WSO2_API_ABNORMAL_REQUESTS
+                GROUP BY applicationId, api_version;
+
+               INSERT OVERWRITE TABLE ORG_WSO2_API_AVG_REQ_FOR_X_DAYS
+               SELECT applicationId, api_version, COUNT(api_version) as request_count
+               FROM ORG_WSO2_API_ABNORMAL_REQUESTS
+               WHERE context is not NULL  AND requestTime >= offsetInDays(-$daysConsiderForAbnormalTierAvailability)
+               GROUP BY convertToDate(requestTime), applicationId, api_version;
+
+               INSERT OVERWRITE TABLE ORG_WSO2_API_ABNORMAL_USAGE_ALERT
+               SELECT S.applicationId, S.api_version
+               FROM ORG_WSO2_API_AVG_REQ_FOR_X_DAYS S, ORG_WSO2_API_PERCENTILE D
+               WHERE S.applicationId = D.applicationId AND S.api_version = D.api_version  AND D.requestsPerDayPercentile  > S.request_count
+               GROUP BY S.applicationId, S.api_version
+               HAVING COUNT(S.api_version) >= $daysConsiderForAbnormalTierAvailability;
+
+               INSERT OVERWRITE TABLE ORG_WSO2_API_ABNORMAL_ADITIONAL_DATA
+               SELECT DISTINCT applicationId, api_version, applicationName, applicationOwner, api, tier
+               FROM ORG_WSO2_API_ABNORMAL_REQUESTS;
+
+               INSERT OVERWRITE TABLE ORG_WSO2_API_ABNORMAL_STREAM_TABLE
+               SELECT R.applicationId, R.api_version, concat(concat(concat(concat(concat(concat(concat(concat(concat(concat('The ', R.applicationName), ' Application owned by '), R.applicationOwner), ' is consuming too less of the allowed quota when accessing the '), R.api), ' API version '), R.api_version), '. It currently uses a '), R.tier), ' subscription.'), now('')
+               FROM ORG_WSO2_API_ABNORMAL_USAGE_ALERT A, ORG_WSO2_API_ABNORMAL_ADITIONAL_DATA R
+               WHERE A.api_version = R.api_version AND A.applicationId = R.applicationId;
+
+               INSERT OVERWRITE TABLE ORG_WSO2_API_ALL_ALERT_STREAM_TABLE
+               SELECT "AbnormalTierUsage", concat(concat(concat(concat(concat(concat(concat(concat(concat(concat('The ', R.applicationName), ' Application owned by '), R.applicationOwner), ' is consuming too less of the allowed quota when accessing the '), R.api), ' API version '), R.api_version), '. It currently uses a '), R.tier), ' subscription.'), now('')
+               FROM ORG_WSO2_API_ABNORMAL_USAGE_ALERT A, ORG_WSO2_API_ABNORMAL_ADITIONAL_DATA R
+               WHERE A.api_version = R.api_version AND A.applicationId = R.applicationId;
+                 ]]>
+            </script>
+            <parameters>
+
+                <parameter name="percentile" type="double">
+                    <displayName>Percentile</displayName>
+                    <description>Percentile value uses to calculate the threshold</description>
+                    <defaultValue>0.05</defaultValue>
+                </parameter>
+                <parameter name="receiverURLPort" type="int">
+                    <displayName>Receiver port</displayName>
+                    <description>Receiver port</description>
+                    <defaultValue>7612</defaultValue>
+                </parameter>
+                <parameter name="authURLPort" type="int">
+                    <displayName>Auth port</displayName>
+                    <description>Authentication port</description>
+                    <defaultValue>7712</defaultValue>
+                </parameter>
+                <parameter name="alertStartDate" type="string">
+                    <displayName>Alert Start  Date</displayName>
+                    <description>Alerting will be activated from this date onwards. format: dd/mm/yyyy</description>
+                    <defaultValue>12/2/2016</defaultValue>
+                </parameter>
+                <parameter name="daysConsiderForPercentilesCalculation" type="int">
+                    <displayName>Days Consider for Percentile Calculation</displayName>
+                    <description>Number of previous days consider for percentile calculation.</description>
+                    <defaultValue>30</defaultValue>
+                </parameter>
+                <parameter name="daysConsiderForAbnormalTierAvailability" type="int">
+                    <displayName>Days Consider for Abnormal Tier Availability Calculation</displayName>
+                    <description>Number of previous days consider for abnormal tier availability calculation.</description>
+                    <defaultValue>5</defaultValue>
+                </parameter>
+
+            </parameters>
+        </template>
+
+
+
+
+        <template name="RequestPerApi">
+            <description>To create RequestPerApi percentile values</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+                CREATE TEMPORARY TABLE REQUEST_PER_API_INFO USING CarbonAnalytics OPTIONS (tableName "org_wso2_analytics_apim_requestPerMinPerApiStream");
+
+        CREATE TEMPORARY TABLE REQUEST_PER_API_PERCENTILE_GEN USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_ANALYTICS_APIM_REQUESTPERAPIPERCENTILE",
+        schema "requestsPerMinPerApiLowerPercentile double,api_version string",
+        primaryKeys "api_version", mergeSchema "false"
+        );
+
+        INSERT INTO TABLE REQUEST_PER_API_PERCENTILE_GEN
+        select getpercentileValue(avg(requestsPerMinPerApi), sqrt(avg(cast(requestsPerMinPerApi
+        as double)*cast(requestsPerMinPerApi as double))-avg(requestsPerMinPerApi)*avg(requestsPerMinPerApi)) , $lowerPercentile ) as requestsPerMinPerApiLowerPercentile,api_version as api_version
+
+        from REQUEST_PER_API_INFO group by api_version;
+
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="lowerPercentile" type="double">
+                    <displayName>Lower percentile</displayName>
+                    <description>Lower percentile value to calculate request per min per api lower percentile</description>
+                    <defaultValue>0.05</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+
+
+
+        <template name="RequestStatGenerator">
+            <description>To generate request stats</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+                CREATE TEMPORARY TABLE REQUEST_INFO USING CarbonAnalytics OPTIONS (tableName "org_wso2_analytics_apim_requestPerMinStream");
+
+        CREATE TEMPORARY TABLE REQUEST_PERCENTILE_GEN USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_ANALYTICS_APIM_REQUESTPERCENTILE",
+        schema "api_version string, userId string, consumerKey string, resourceTemplate string, method string, requestsPerMinUpperPercentile double, requestsPerMinLowerPercentile double ",
+        primaryKeys "api_version,userId,consumerKey,resourceTemplate,method"
+        );
+
+        INSERT OVERWRITE TABLE REQUEST_PERCENTILE_GEN
+        select api_version, userId, consumerKey, resourceTemplate, method,
+        getpercentileValue(avg(requestsPerMin), sqrt(avg(cast(requestsPerMin
+        as double)*cast(requestsPerMin as double))-avg(requestsPerMin)*avg(requestsPerMin)) , $upperPercentile ) as requestsPerMinUpperPercentile,
+        getpercentileValue(avg(requestsPerMin), sqrt(avg(cast(requestsPerMin
+        as double)*cast(requestsPerMin as double))-avg(requestsPerMin)*avg(requestsPerMin)) , $lowerPercentile ) as requestsPerMinLowerPercentile
+
+        from REQUEST_INFO group by api_version, userId, consumerKey, resourceTemplate, method;
+
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="upperPercentile" type="double">
+                    <displayName>Upper Percentile</displayName>
+                    <description>Upper percentile value to calculate requests per min upper percentile</description>
+                    <defaultValue>0.95</defaultValue>
+                </parameter>
+
+
+                <parameter name="lowerPercentile" type="double">
+                    <displayName>lowerPercentile</displayName>
+                    <description>Lower percentile value to calculate requests per min </description>
+                    <defaultValue>0.05</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+
+        <template name="ResponsePerApiStatGenerator">
+            <description>To create Response per api percentile values</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+                CREATE TEMPORARY TABLE RESPONSE_PER_API_INFO USING CarbonAnalytics OPTIONS (tableName "org_wso2_analytics_apim_responsePerMinPerApiStream");
+
+        CREATE TEMPORARY TABLE RESPONSE_PER_API_PERCENTILE_GEN USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_ANALYTICS_APIM_RESPONSEPERAPIPERCENTILE",
+        schema "api_version string, responsesPerMinPerApiLowerPercentile double",
+        primaryKeys "api_version"
+        );
+
+        INSERT INTO TABLE RESPONSE_PER_API_PERCENTILE_GEN
+        select api_version,
+        getpercentileValue(avg(responsesPerMinPerApi), sqrt(avg(cast(responsesPerMinPerApi
+        as double)*cast(responsesPerMinPerApi as double))-avg(responsesPerMinPerApi)*avg(responsesPerMinPerApi)) , $lowerPercentile ) as responsesPerMinPerApiLowerPercentile
+        from RESPONSE_PER_API_INFO group by api_version;
+
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="lowerPercentile" type="double">
+                    <displayName>Lower percentile</displayName>
+                    <description>Lower percentile value to calculate responsesPerMinPerApiLowerPercentile</description>
+                    <defaultValue>0.05</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+
+
+
+        <template name="Response time">
+            <description>To create response time percentile values</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+                CREATE TEMPORARY TABLE RESPONSE_INFO USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_APIMGT_STATISTICS_RESPONSE",schema "_timestamp LONG ");
+
+        CREATE TEMPORARY TABLE RESPONSE_PER_TIME_PERCENTILE_GEN USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_ANALYTICS_APIM_RESPONSETIMEPERAPIPERCENTILE",
+        schema "api_version string,  responseTimePerApiUpperPercentile double ",
+        primaryKeys "api_version" , mergeSchema "false"
+        );
+
+        INSERT INTO TABLE RESPONSE_PER_TIME_PERCENTILE_GEN
+        select api_version,
+        getpercentileValue(avg(responseTime), sqrt(avg(cast(responseTime as double)*cast(responseTime as double))-avg(responseTime)*avg(responseTime)) , $upperPercentile ) as responseTimePerApiUpperPercentile
+
+        from RESPONSE_INFO where _timestamp>(now('')-86400000) group by api_version;
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="upperPercentile" type="double">
+                    <displayName>Upper percentile</displayName>
+                    <description>Upper percentile value to calculate responseTimePerApiUpperPercentile</description>
+                    <defaultValue>0.95</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+
+
+        <template name="Response stat generator">
+            <description>To create response percentile values</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+                CREATE TEMPORARY TABLE RESPONSE_INFO USING CarbonAnalytics OPTIONS (tableName
+        "ORG_WSO2_APIMGT_STATISTICS_RESPONSE",schema "_timestamp LONG ");
+
+
+        CREATE TEMPORARY TABLE RESPONSE_PERCENTILE_GEN USING CarbonAnalytics OPTIONS (tableName "ORG_WSO2_ANALYTICS_APIM_RESPONSEPERCENTILE",
+        schema "api_version string, tenantDomain string, resourceTemplate string, method string, responsePercentile double, backendPercentile double ",
+        primaryKeys "api_version,tenantDomain,resourceTemplate,method"
+        );
+
+
+        INSERT OVERWRITE TABLE RESPONSE_PERCENTILE_GEN
+        select api_version, tenantDomain, resourceTemplate, method,
+        getpercentileValue(avg(responseTime), sqrt(avg(cast(responseTime as double)*cast(responseTime as double))-avg(responseTime)*avg(responseTime)) , $upperPercentileRespondTime ) as responsePercentile,
+        getpercentileValue(avg(backendTime), sqrt(avg(cast(backendTime as double)*cast(backendTime as double))-avg(backendTime)*avg(backendTime)) , $upperPercentilebackendTime ) as backendPercentile
+        from RESPONSE_INFO where _timestamp>(now('')-86400000) group by api_version, tenantDomain, resourceTemplate, method;
+
+                 ]]>
+            </script>
+            <parameters>
+                <parameter name="upperPercentileRespondTime" type="double">
+                    <displayName>Upper percentile response time</displayName>
+                    <description>Upper percentile value to calculate responsePercentile</description>
+                    <defaultValue>0.95</defaultValue>
+                </parameter>
+                <parameter name="upperPercentilebackendTime" type="double">
+                    <displayName>Upper percentile backend time</displayName>
+                    <description>Upper percentile value to calculate backendPercentile</description>
+                    <defaultValue>0.95</defaultValue>
+                </parameter>
+            </parameters>
+        </template>
+
+        <template name="APIM_GEO_LOCATION_STATS">
+            <description>To generate Geo locations-based statistics</description>
+            <executionType>batch</executionType>
+
+            <script>
+                <![CDATA[
+    create temporary table APIRequestData USING CarbonAnalytics OPTIONS(tableName "ORG_WSO2_APIMGT_STATISTICS_REQUEST");
+    CREATE TEMPORARY TABLE API_REQUEST_GEOIP_SUMMARY_FINAL USING CarbonAnalytics OPTIONS (tableName "API_REQUEST_GEOIP_SUMMARY",
+    schema "api string -i,
+    version string -i,
+    apiPublisher string -i,
+    tenantDomain string -i,
+    total_request_count int -i,
+    year int -i,
+    month int -i,
+    day int -i,
+    requestTime long -i,
+    clientIp string -i",
+    primaryKeys "api,version,apiPublisher,year,month,day,clientIp,tenantDomain"
+    );
+    insert into table API_REQUEST_GEOIP_SUMMARY_FINAL select api,version, apiPublisher,tenantDomain,
+    sum(request) as total_request_count,
+    substring(cast(first(requestTime)/1000 as timestamp),0,4),
+    substring(cast(first(requestTime)/1000 as timestamp),6,2),
+    substring(cast(first(requestTime)/1000 as timestamp),9,2),
+    first(requestTime),
+    clientIp
+    from APIRequestData group by api,version,apiPublisher,clientIp,tenantDomain,
+    substring(cast(requestTime/1000 as timestamp),0,4),
+    substring(cast(requestTime/1000 as timestamp),6,2),
+    substring(cast(requestTime/1000 as timestamp),9,2);
+
+    CREATE TEMPORARY TABLE API_REQUEST_GEO_LOCATION_SUMMARY_FINAL USING CarbonAnalytics OPTIONS (tableName "API_REQUEST_GEO_LOCATION_SUMMARY",
+    schema "api string -i,
+    version string -i,
+    apiPublisher string -i,
+    tenantDomain string -i,
+    total_request_count int -i,
+    year int -i,
+    month int -i,
+    day int -i,
+    requestTime long -i,
+    country string -i,
+    city string -i,
+    key_country_city_facet facet -i",
+    primaryKeys "api,version,apiPublisher,year,month,day,country,city,tenantDomain"
+    );
+    insert INTO table API_REQUEST_GEO_LOCATION_SUMMARY_FINAL select apidata.api,apidata.version, apidata.apiPublisher,apidata.tenantDomain,
+    sum(apidata.total_request_count) as total_request_count,apidata.year,apidata.month,apidata.day,first(requestTime),getCountry(apidata.clientIp) as country,
+    getCity(apidata.clientIp) as city,facet2(getCountry(apidata.clientIp),getCity(apidata.clientIp))
+    from API_REQUEST_GEOIP_SUMMARY_FINAL as apidata group by apidata.api,apidata.version,apidata.apiPublisher,apidata.year,apidata.month,apidata.day,apidata.clientIp,getCountry(apidata.clientIp),getCity(apidata.clientIp),apidata.tenantDomain;
+
+
+                 ]]>
+            </script>
+
+        </template>
+
+
+    </templates>
+
+
+    <streams>
+
+    </streams>
+</templateDomain>
