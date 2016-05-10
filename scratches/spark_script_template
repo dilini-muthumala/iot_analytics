@@ -1,0 +1,44 @@
+    CREATE TEMPORARY TABLE tempStatPerMinute USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-minute",
+        incrementalParams "tempStatPerMinute, 3600",
+        mergeSchema "false");
+
+	CREATE TEMPORARY TABLE tempStatPerHour USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-hour",
+        schema "year INT -i, month INT -i, day INT -i, hour INT -I, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, day, hour,timestamp",
+        incrementalParams "tempStatPerHour, 86400",
+        mergeSchema "false");
+
+
+        INSERT INTO TABLE tempStatPerHour
+        SELECT year, month, day, hour, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getHourStartingTime(year, month, day, hour) as timestamp
+        FROM tempStatPerMinute
+        GROUP BY year, month, day, hour;
+
+        CREATE TEMPORARY TABLE tempStatPerDay USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-day",
+        schema "year INT -i, month INT -i, day INT -i, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, day,timestamp",
+        incrementalParams "tempStatPerDay, 86400",
+        mergeSchema "false");
+
+        INSERT INTO TABLE tempStatPerDay
+        SELECT year, month, day, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getDateStartingTime(year, month, day) as timestamp
+        FROM tempStatPerHour
+        GROUP BY year, month, day;
+
+        CREATE TEMPORARY TABLE tempStatPerMonth USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-month",
+        schema "year INT -i, month INT -i, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, timestamp",
+        incrementalParams "tempStatPerMonth, 86400",
+        mergeSchema "false");
+
+        INSERT INTO TABLE tempStatPerMonth
+        SELECT year, month, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getMonthStartingTime(year, month) as timestamp
+        FROM tempStatPerDay
+        GROUP BY year, month;

@@ -29,7 +29,6 @@ insert into statStreamMin;
 -------------
 --StreamName
 --StreamVersion
---StreamNameVersionSeparator
 
 --timestampAttr
 --valueAttr
