@@ -16,12 +16,13 @@
   ~ limitations under the License.
   -->
 <templateDomain name="CustomDashboardAnalytics">
-    <description>Real-time and batch query templates for creating custom analytic dashboards</description>
+    <description>Templates for creating custom analytic dashboards</description>
     <templates>
 
 
         <template name="AddGadget">
-            <description>Configure a gadget to display stats, given a stream of your choice</description>
+            <description>Configure a gadget to display stats, given a stream of your choice
+            </description>
             <executionType>iot</executionType>
 
             <executionPlans>
@@ -56,9 +57,8 @@ insert into statStreamMin;
                 </executionPlan>
             </executionPlans>
 
-            <sparkScripts>
-                <sparkScript>
-                    <![CDATA[
+            <sparkScript cronExpression="0 0/5 * 1/1 * ? *">
+                <![CDATA[
     CREATE TEMPORARY TABLE tempStatPerMinute USING CarbonAnalytics
         OPTIONS (tableName "temp-stat-per-minute",
         incrementalParams "tempStatPerMinute, 3600",
@@ -104,9 +104,7 @@ insert into statStreamMin;
         FROM tempStatPerDay
         GROUP BY year, month;
                             ]]>
-                </sparkScript>
-
-            </sparkScripts>
+            </sparkScript>
 
             <streams>
                 <stream>
@@ -157,8 +155,9 @@ insert into statStreamMin;
                 </stream>
             </streams>
 
-            <eventSink>
-                <!--todo: resolve inconsistency in the element name: non camel case below-->
+            <eventSinks>
+                <eventSink>
+                    <![CDATA[
                 <EventStoreConfiguration>
                     <TableSchema>
                         <ColumnDefinition>
@@ -240,7 +239,13 @@ insert into statStreamMin;
                     <MergeSchema>false</MergeSchema>
                     <RecordStoreName>EVENT_STORE</RecordStoreName>
                 </EventStoreConfiguration>
-            </eventSink>
+                    ]]>
+                </eventSink>
+            </eventSinks>
+
+            <gadgetConfig>
+                {"tableName":"temp_stat_per-", "metric":"_avg"}
+            </gadgetConfig>
 
             <parameters>
                 <parameter name="StreamName" type="string">
@@ -263,7 +268,9 @@ insert into statStreamMin;
 
                 <parameter name="valueAttr" type="double">
                     <displayName>Value Attribute</displayName>
-                    <description>Select the attribute you want the stats of E.g. temperature, humidity</description>
+                    <description>Select the attribute you want the stats of E.g. temperature,
+                        humidity
+                    </description>
                     <defaultValue>temperature</defaultValue>
                 </parameter>
 

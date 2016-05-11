@@ -1,0 +1,46 @@
+<templateDomain name="CustomDashboardAnalytics">
+    <description>Templates for creating custom analytic dashboards</description>
+    <templateConfigs>
+        <templateConfig name="addGadgetIoTScenario">
+            <description>Configure a gadget to display stats, given a stream of your choice</description>
+            <templates>
+                <!--Note: These will be deployed in the order they appear here-->
+                <template type="eventStream">
+
+                </template>
+                <template type="eventSink">
+
+                </template>
+                <template type="realTime">
+
+                </template>
+                <template type="realTime">     <!--Can define multiple Templates of same type. E.g. of type realTime, as shown here.-->
+
+                </template>
+                <template type="batch">
+
+                </template>
+                <template type="gadget">
+
+                </template>
+
+            </templates>
+            <streamMappings>
+                <streamMapping to="$XStream:1.0.0"/>
+            </streamMappings>
+            <parameters>
+                <parameter>
+
+                </parameter>
+            </parameters>
+
+        </templateConfig>
+    </templateConfigs>
+    <commonArtifacts>
+        <artifact type="eventStream">
+
+        </artifact>
+    </commonArtifacts>
+</templateDomain>
+
+
