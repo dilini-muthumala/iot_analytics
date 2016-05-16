@@ -6,19 +6,214 @@
             <templates>
                 <!--Note: These will be deployed in the order they appear here-->
                 <template type="eventStream">
-
+                    {
+                    "name": "$streamName-stat-per-minute",
+                    "version": "$streamVersion",
+                    "nickName": "",
+                    "description": "",
+                    "payloadData": [
+                    {
+                    "name": "$timestampAttr",
+                    "type": "LONG"
+                    },
+                    {
+                    "name": "year",
+                    "type": "INT"
+                    },
+                    {
+                    "name": "month",
+                    "type": "INT"
+                    },
+                    {
+                    "name": "day",
+                    "type": "INT"
+                    },
+                    {
+                    "name": "hour",
+                    "type": "INT"
+                    },
+                    {
+                    "name": "minute",
+                    "type": "INT"
+                    },
+                    {
+                    "name": "_avg",
+                    "type": "DOUBLE"
+                    },
+                    {
+                    "name": "_count",
+                    "type": "LONG"
+                    },
+                    {
+                    "name": "_sum",
+                    "type": "DOUBLE"
+                    }
+                    ]
+                    }
                 </template>
                 <template type="eventSink">
-
+                    <![CDATA[
+                <EventStoreConfiguration>
+                    <TableSchema>
+                        <ColumnDefinition>
+                            <Name>$timestampAttr</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>LONG</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>year</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>INTEGER</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>month</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>INTEGER</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>day</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>INTEGER</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>hour</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>INTEGER</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>minute</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>true</EnableIndexing>
+                            <IsPrimaryKey>true</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>INTEGER</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>_avg</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>false</EnableIndexing>
+                            <IsPrimaryKey>false</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>DOUBLE</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>_count</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>false</EnableIndexing>
+                            <IsPrimaryKey>false</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>LONG</Type>
+                        </ColumnDefinition>
+                        <ColumnDefinition>
+                            <Name>_sum</Name>
+                            <IsFacet>false</IsFacet>
+                            <EnableIndexing>false</EnableIndexing>
+                            <IsPrimaryKey>false</IsPrimaryKey>
+                            <EnableScoreParam>false</EnableScoreParam>
+                            <Type>DOUBLE</Type>
+                        </ColumnDefinition>
+                    </TableSchema>
+                    <Source>
+                        <StreamId>$streamName-stat-per-minute:$streamVersion</StreamId>
+                    </Source>
+                    <MergeSchema>false</MergeSchema>
+                    <RecordStoreName>EVENT_STORE</RecordStoreName>
+                </EventStoreConfiguration>
+                    ]]>
                 </template>
                 <template type="realTime">
+                    <![CDATA[
+/* Enter a unique ExecutionPlan */
+@Plan:name('AnalyticsExecutionPlanUsing$streamName:$streamVersion')
 
-                </template>
-                <template type="realTime">     <!--Can define multiple Templates of same type. E.g. of type realTime, as shown here.-->
+/* Enter a unique description for ExecutionPlan */
+@Plan:description('ExecutionPlan for analysing $streamName:$streamVersion stream')
 
+/* define streams/tables and write queries here ... */
+
+@Import('$streamName:$streamVersion')
+define stream rawStream ($timestampAttr long, $valueAttr double);
+
+@Export('$streamName-stat-per-minute:$streamVersion')
+define stream statStreamMin ($timestampAttr long, year int, month int, day int, hour int, minute int, _avg double, _count long, _sum double);
+
+--per second stats
+from rawStream#window.externalTimeBatch($timestampAttr, 1 sec, 0)
+select $timestampAttr, avg($valueAttr) as _avg, count($valueAttr) as _count, sum($valueAttr) as _sum
+insert into statStreamSec;
+--NO usage of statStreamSec stream yet. As such, NO persisting of this stream yet.
+
+--per minute stats
+from statStreamSec#window.externalTimeBatch($timestampAttr, 60 sec, 0)
+select $timestampAttr, time:extract($timestampAttr, 'year') as year, time:extract($timestampAttr, 'month') as month, time:extract($timestampAttr, 'day') as day, time:extract($timestampAttr, 'hour') as hour, time:extract($timestampAttr, 'minute') as minute, avg(_avg) as _avg, sum(_count) as _count, sum(_sum) as _sum
+insert into statStreamMin;
+--EXPORT statStreamMin
+                    ]]>
                 </template>
+                <!--<template type="realTime">     &lt;!&ndash;Can define multiple Templates of same type. E.g. of type realTime, as shown here.&ndash;&gt;-->
+
+                <!--</template>-->
                 <template type="batch">
+                    <![CDATA[
+    CREATE TEMPORARY TABLE tempStatPerMinute USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-minute",
+        incrementalParams "tempStatPerMinute, 3600",
+        mergeSchema "false");
 
+	CREATE TEMPORARY TABLE tempStatPerHour USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-hour",
+        schema "year INT -i, month INT -i, day INT -i, hour INT -I, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, day, hour,timestamp",
+        incrementalParams "tempStatPerHour, 86400",
+        mergeSchema "false");
+
+        INSERT INTO TABLE tempStatPerHour
+        SELECT year, month, day, hour, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getHourStartingTime(year, month, day, hour) as timestamp
+        FROM tempStatPerMinute
+        GROUP BY year, month, day, hour;
+
+        CREATE TEMPORARY TABLE tempStatPerDay USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-day",
+        schema "year INT -i, month INT -i, day INT -i, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, day,timestamp",
+        incrementalParams "tempStatPerDay, 86400",
+        mergeSchema "false");
+
+        INSERT INTO TABLE tempStatPerDay
+        SELECT year, month, day, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getDateStartingTime(year, month, day) as timestamp
+        FROM tempStatPerHour
+        GROUP BY year, month, day;
+
+        CREATE TEMPORARY TABLE tempStatPerMonth USING CarbonAnalytics
+        OPTIONS (tableName "temp-stat-per-month",
+        schema "year INT -i, month INT -i, avg_temp DOUBLE -i, count_temp DOUBLE -i, sum_temp DOUBLE -i, timestamp LONG -i",
+        primaryKeys "year, month, timestamp",
+        incrementalParams "tempStatPerMonth, 86400",
+        mergeSchema "false");
+
+        INSERT INTO TABLE tempStatPerMonth
+        SELECT year, month, avg(avg_temp) as avg_temp, sum(count_temp) as count_temp, sum(sum_temp) as sum_temp,
+        getMonthStartingTime(year, month) as timestamp
+        FROM tempStatPerDay
+        GROUP BY year, month;
+                            ]]>
                 </template>
                 <template type="gadget">
 
@@ -29,8 +224,30 @@
                 <streamMapping to="$XStream:1.0.0"/>
             </streamMappings>
             <parameters>
-                <parameter>
+                <parameter name="StreamName" type="string">
+                    <displayName>Stream Name</displayName>
+                    <description>Stream Name</description>
+                    <defaultValue>temp-stream</defaultValue>
+                </parameter>
 
+                <parameter name="StreamVersion" type="string">
+                    <displayName>Stream Version</displayName>
+                    <description>Stream Version</description>
+                    <defaultValue>1.0.0</defaultValue>
+                </parameter>
+
+                <parameter name="timestampAttr" type="long">
+                    <displayName>Timestamp Attribute</displayName>
+                    <description>Select the timestamp attribute in your input stream</description>
+                    <defaultValue>timestamp</defaultValue>
+                </parameter>
+
+                <parameter name="valueAttr" type="double">
+                    <displayName>Value Attribute</displayName>
+                    <description>Select the attribute you want the stats of E.g. temperature,
+                        humidity
+                    </description>
+                    <defaultValue>temperature</defaultValue>
                 </parameter>
             </parameters>
 
@@ -38,7 +255,22 @@
     </templateConfigs>
     <commonArtifacts>
         <artifact type="eventStream">
-
+            {
+            "name": "humidity_stream",
+            "version": "1.0.0",
+            "nickName": "",
+            "description": "",
+            "payloadData": [
+            {
+            "name": "timestamp",
+            "type": "LONG"
+            },
+            {
+            "name": "temperature",
+            "type": "DOUBLE"
+            }
+            ]
+            }
         </artifact>
     </commonArtifacts>
 </templateDomain>
