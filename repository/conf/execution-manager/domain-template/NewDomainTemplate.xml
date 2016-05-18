@@ -1,7 +1,7 @@
-<templateDomain name="CustomDashboardAnalytics">
+<executionManagerTemplate domain="CustomDashboardAnalytics">
     <description>Templates for creating custom analytic dashboards</description>
-    <templateConfigs>
-        <templateConfig name="addGadgetIoTScenario">
+    <scenarios>
+        <scenario name="addGadgetIoTScenario">
             <description>Configure a gadget to display stats, given a stream of your choice</description>
             <templates>
                 <!--Note: These will be deployed in the order they appear here-->
@@ -222,6 +222,7 @@ insert into statStreamMin;
             </templates>
             <streamMappings>
                 <streamMapping to="$XStream:1.0.0"/>
+                <streamMapping to="$YStream:1.0.0"/>
             </streamMappings>
             <parameters>
                 <parameter name="StreamName" type="string">
@@ -251,8 +252,8 @@ insert into statStreamMin;
                 </parameter>
             </parameters>
 
-        </templateConfig>
-    </templateConfigs>
+        </scenario>
+    </scenarios>
     <commonArtifacts>
         <artifact type="eventStream">
             {
@@ -273,6 +274,6 @@ insert into statStreamMin;
             }
         </artifact>
     </commonArtifacts>
-</templateDomain>
+</executionManagerTemplate>
 
 
